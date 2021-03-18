@@ -28,11 +28,11 @@ parser.add_argument('--Dualresume', default='', type=str)
 parser.add_argument('--show', default='', type=bool)
 parser.add_argument('-CT', type=bool,help='Continue to train a model')
 parser.add_argument('--Val', type=bool, help='Valiate the generalization ability')
-parser.add_argument('--dataset', type=str, help='attack target dataset')
+parser.add_argument('--SID_data_type', type=str, help='attack target dataset')
 parser.add_argument('--save-dir', type=str, help='save checkpoint')
 parser.add_argument('--ExDate', type=str, help='experiment date')
 parser.add_argument('--optimizer', type=str,help='SGD or Adam')
-parser.add_argument('--adv_type', type=str, help='attack methods: FGSM|DeepFool|CWL2|BIM')
+parser.add_argument('--SID_adv_type', type=str, help='attack methods: FGSM|DeepFool|CWL2|BIM')
 parser.add_argument('--domain', type=str, default='PD', help='Frequence domian or pixel domian')
 parser.add_argument('--Model', type=str, help='adversarial samples detection model')
 parser.add_argument('--gpuid', type=str)
@@ -40,17 +40,18 @@ parser.add_argument('--ScriptName', type=str)
 parser.add_argument('--shuffle', default=False, type=bool)
 parser.add_argument('--retrain', default=False, type=bool)
 parser.add_argument('--Verify', type=bool, help='whether or not to verify the trained model')
-parser.add_argument('--ATP1', default=0.9, type=float, help='parameter of attack methods')
+parser.add_argument('--SID_net_type', type=str, help='Target Model: resnet|VggBn')
 parser.add_argument('--ATP2', default=0.9, type=float, help='parameter of attack methods')
 parser.add_argument('--wavemode', type=str, help='the mode to combination four channel of wavelets (average or append)')
 parser.add_argument('--wave', type=str, help='wavelets used to train a FDmodel')
 parser.add_argument('--outf', default='./adv_output/', help='folder to output results')
 parser.add_argument('--FeatureLayers', default=[], type=list,
                     help='layers used to calculate LID features and MHB features (Comparision methods)')
-parser.add_argument('--AdvNoise', default=0., type=float,
-                    help='average Linf norm of the difference between clean images and adversarial imags')
-parser.add_argument('--Calibration', default=0., type=float, help='ignore it')
+parser.add_argument('--SID_magnitude', default=0., type=float,
+                    help='perturbation magnitude')
+
 parser.add_argument('--num_class', default=10, type=int)
+
 parser.set_defaults(CT=False)
 parser.set_defaults(ATP2 = 0.1)
 parser.set_defaults(ExDate='10-23')
@@ -66,10 +67,7 @@ parser.set_defaults(Verify = False)
 parser.set_defaults(shuffle = True)
 parser.set_defaults(FDmode='append')
 parser.set_defaults(ATP1 = 0.005)
-parser.set_defaults(dataset='svhn')
 parser.set_defaults(Model = 'Dual4')
-parser.set_defaults(net_type  = 'VggBn')
-parser.set_defaults(adv_type='DF')
 parser.set_defaults(optimizer = 'SGD')
 parser.set_defaults(gpuid = '1')
 parser.set_defaults(momentum = 0.8)
@@ -83,123 +81,76 @@ best_prec1 = 0
 def main():
     global args, DIR,TESTDIRDIR
     args = parser.parse_args()
-    args.save_dir = 'ExperimentRecord/'+'KnownAttack'+'/'
-    LIST = os.listdir(args.save_dir)
-    RCraw, RSraw, VCraw, VSraw = [], [], [], []
-    for path in LIST:
-        if path.split('_')[0] == 'resnet' and path.split('_')[1] == 'cifar10':
-            RCraw.append(path.split('_')[3]+'_'+path.split('_')[4])
-        if path.split('_')[0] == 'resnet' and path.split('_')[1] == 'svhn':
-            RSraw.append(path.split('_')[3]+'_'+path.split('_')[4])
-        if path.split('_')[0] == 'VggBn' and path.split('_')[1] == 'cifar10':
-            VCraw.append(path.split('_')[3]+'_'+path.split('_')[4])
-        if path.split('_')[0] == 'VggBn' and path.split('_')[1] == 'svhn':
-            VSraw.append(path.split('_')[3]+'_'+path.split('_')[4])
+    args.ScriptName = os.path.basename(sys.argv[0].split('/')[-1].split('.')[0])
+    args.AE_source = 'ExperimentRecord/KnownAttack/'
+    args.save_dir = os.path.join('ExperimentRecord/',args.ScriptName)
+    os.makedirs(args.save_dir,exist_ok=True)
 
+    #### create DataFrames to save results
+    DataFrames = {}
+    for path in os.listdir(args.AE_source):
+        net_type = path.split('_')[0]
+        data_type = path.split('_')[1]
+        adv_type = path.split('_')[2]
+        magnitude = path.split('_')[3]
+        if not net_type+'_'+data_type in DataFrames.keys():
+            DataFrames[net_type + '_' + data_type] = {}
+            DataFrames[net_type + '_' + data_type]['sources'] = []
+        DataFrames[net_type+'_'+data_type]['sources'].append(adv_type+'_'+magnitude)
 
-    RCdfbest = pd.DataFrame(np.zeros([len(RCraw), len(RCraw)]), index=RCraw, columns=RCraw)
-    RSdfbest = pd.DataFrame(np.zeros([len(RSraw), len(RSraw)]), index=RSraw, columns=RSraw)
-    VCdfbest = pd.DataFrame(np.zeros([len(VCraw), len(VCraw)]), index=VCraw, columns=VCraw)
-    VSdfbest = pd.DataFrame(np.zeros([len(VSraw), len(VSraw)]), index=VSraw, columns=VSraw)
+    for key in DataFrames.keys():
+        sources = sorted(DataFrames[key]['sources'])
+        DataFrames[key]['data'] = pd.DataFrame(np.zeros([len(sources), len(sources)]), index=sources, columns=sources)
 
-    for path in LIST:
-        if not len(path.split('_')) == 5:
+    #### create SID
+    SID = get_dual_model(C_Number=3, num_class=10)
+    SID.cuda()
+
+    for SID_name in os.listdir(args.AE_source):
+        args.SID_net_type = SID_name.split('_')[0]
+        args.SID_data_type = SID_name.split('_')[1]
+        args.SID_adv_type = SID_name.split('_')[2]
+        args.SID_magnitude = SID_name.split('_')[3]
+        args.SID_AE_source = args.SID_adv_type+'_'+args.SID_magnitude
+        Detector_path = os.path.join(args.AE_source,SID_name)
+        DetectorResume = os.path.join(Detector_path, 'checkpoint.tar')
+        if not os.path.exists(DetectorResume):
             continue
-        args.net_type = path.split('_')[0]
-        args.dataset = path.split('_')[1]
-        args.adv_type = path.split('_')[3]
-        args.AdvNoise = path.split('_')[4]
-        if not args.dataset == 'svhn':
-            continue
-        path = os.path.join(args.save_dir,path)
-        if args.net_type == 'VggBn':
-            continue
-        RCdfbest,RSdfbest,VCdfbest,VSdfbest = TrainDetector(LIST,args,path,RCdfbest,RSdfbest,VCdfbest,VSdfbest)
-        print()
-    RCdfbest.to_csv('RC1.csv')
-    RSdfbest.to_csv('RV1.csv')
-    VCdfbest.to_csv('VC2.csv')
-    VSdfbest.to_csv('VS3.csv')
+        else:
+            Dualcheckpoint = torch.load(DetectorResume)
+            SID.load_state_dict(Dualcheckpoint['state_dict'])
 
-def TrainDetector(LIST,args,path,RCdfbest,RSdfbest,VCdfbest,VSdfbest):
-    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpuid
-    if args.net_type == 'VggBn' and args.dataset == 'cifar10':
-        args.FixedWave = 'Fixed'
-    else:
-        args.FixedWave = 'Fixed1'
+        for adv_source in os.listdir(args.AE_source):
+            source_net_type = adv_source.split('_')[0]
+            source_data_type = adv_source.split('_')[1]
+            if source_net_type == args.SID_net_type and source_data_type == args.SID_data_type:
+                print("Using SID ({}) to detect AEs of source: {}".format(SID_name,adv_source))
+                DataFrames = Detect(adv_source,SID,args,DataFrames)
 
-    #### Create PD and FD models
-    args.domain = 'PD'
-    PDmodel = GET_MODEL(args,args.net_type)
-    args.domain = 'FD'
-    FDmodel = GET_MODEL(args,args.net_type)
-    # print('################## Load model: {} ##################'.format(args.net_type))
-    PDmodel.cuda()
-    FDmodel.cuda()
-    FDmodel.eval()
-    PDmodel.eval()
-    #### Define loss function
-    criterion = nn.CrossEntropyLoss().cuda()
-    #### get detection model
-    # print('################## Load Dual Detector: {} ##################'.format(args.Model))
-    DualMOdel = get_dual_model(C_Number=3, wave = args.wave,num_class=args.num_class)
-    DualMOdel.cuda()
-    ResumePath = os.path.join(path, 'checkpoint')
-    args.Dualresume = os.path.join(ResumePath,os.listdir(ResumePath)[0])
-    if os.path.exists(args.Dualresume):
-        Dualcheckpoint = torch.load(args.Dualresume)
-        DualMOdel.load_state_dict(Dualcheckpoint['state_dict'])
-        best_prec1 = Dualcheckpoint['best_prec1']
-        # print('The Best Accuracy of the DUAL is: {:.2F}'.format(best_prec1))
-        args.start_epoch = Dualcheckpoint['epoch']
-        args.lr = 0.0015
-    else:
-        print('\nNo pretrained Dualmodel !!!')
-        return
+    for key in DataFrames.keys():
+        DataFrames[key]['data'].to_csv('{}.csv'.format(key))
+        print('Save generalizability results of SIDs on: {}'.format(key))
 
-    source = '{}_{}'.format(args.adv_type,args.AdvNoise)
-    # print('The source is: {}_{}'.format(source,args.dataset))
-    for TargrtPath in LIST:
-        path = os.path.join(args.save_dir, TargrtPath)
-        if not len(TargrtPath.split('_')) == 5:
-            continue
-        net_type = TargrtPath.split('_')[0]
-        dataset = TargrtPath.split('_')[1]
-        if net_type == 'VggBn':
-            continue
-        if not net_type == args.net_type or not dataset == args.dataset:
-            continue
-        try:
-            adv_type = TargrtPath.split('_')[3]
-        except:
-            print()
-        AdvNoise = TargrtPath.split('_')[4]
 
-        Logit_Save = os.path.join(path,'Logits')
-        # print(Logit_Save)
-        BLogits, BLabel, CTarget, CLogits, TrainIndex, ValIndex = GetStackLogitValues([], [], [], [], PDmodel, FDmodel, args,Logit_Save)
-        results, prec1 = ValClassifer(BLogits, BLabel, DualMOdel,ValIndex, args.save_dir)
-        print('{}_{}_{}_{} detect {}_{}_{}_{}'.format(args.net_type,args.dataset,args.adv_type,args.AdvNoise,net_type,dataset,adv_type,AdvNoise))
-        for mtype in ['TNR', 'AUROC', 'DTACC', 'AUIN', 'AUOUT']:
-            print(' {mtype:6s}'.format(mtype=mtype), end='')
-        print('\n{val:6.2f}'.format(val=100. * results['TMP']['TNR']), end='')
-        print(' {val:6.2f}'.format(val=100. * results['TMP']['AUROC']), end='')
-        print(' {val:6.2f}'.format(val=100. * results['TMP']['DTACC']), end='')
-        print(' {val:6.2f}'.format(val=100. * results['TMP']['AUIN']), end='')
-        print(' {val:6.2f}\n'.format(val=100. * results['TMP']['AUOUT']), end='')
-        if args.net_type == net_type == 'resnet' and args.dataset == dataset == 'cifar10':
-            RCdfbest[adv_type+'_'+AdvNoise] [args.adv_type+'_'+args.AdvNoise]= round(100. * results['TMP']['AUROC'],2)
-        if args.net_type == net_type == 'resnet' and args.dataset == dataset == 'svhn':
-            RSdfbest[adv_type+'_'+AdvNoise][args.adv_type+'_'+args.AdvNoise] = round(100. * results['TMP']['AUROC'],2)
-        if args.net_type == net_type == 'VggBn' and args.dataset == dataset == 'cifar10':
-            VCdfbest[adv_type+'_'+AdvNoise][args.adv_type+'_'+args.AdvNoise] = round(100. * results['TMP']['AUROC'],2)
-        if args.net_type == net_type == 'VggBn' and args.dataset == dataset == 'svhn':
-            try:
-                VSdfbest[adv_type+'_'+AdvNoise][args.adv_type+'_'+args.AdvNoise] = round(100. * results['TMP']['AUROC'],2)
-            except:
-                print()
 
-    return RCdfbest,RSdfbest,VCdfbest,VSdfbest
+
+def Detect(adv_source,SID,args,DataFrames):
+    LogitsPath = os.path.join(os.path.join(args.AE_source, adv_source),'Logits')
+    BLogits, BLabel, CTarget, CLogits, TrainIndex, ValIndex = GetStackLogitValues(LogitsPath)
+    results = ValClassifer(BLogits, BLabel, SID, ValIndex, args.save_dir,PRINT=False)
+    target_AE_source = adv_source.split('_')[2]+'_'+adv_source.split('_')[3]
+    DataFrames[args.SID_net_type + '_' + args.SID_data_type]['data'][args.SID_AE_source][target_AE_source] = '{:.2f}'.format(100*results['TMP']['AUROC'])
+
+    for mtype in ['TNR', 'AUROC', 'DTACC', 'AUIN', 'AUOUT']:
+        print(' {mtype:6s}'.format(mtype=mtype), end='')
+    print('\n{val:6.2f}'.format(val=100. * results['TMP']['TNR']), end='')
+    print(' {val:6.2f}'.format(val=100. * results['TMP']['AUROC']), end='')
+    print(' {val:6.2f}'.format(val=100. * results['TMP']['DTACC']), end='')
+    print(' {val:6.2f}'.format(val=100. * results['TMP']['AUIN']), end='')
+    print(' {val:6.2f}\n'.format(val=100. * results['TMP']['AUOUT']), end='')
+
+    return DataFrames
+
 
 def TrainClassifer(BLogits,BLabel,model,CLogits,CTarget,criterion, optimizer, epoch,TrainIndex):
     """
@@ -428,66 +379,6 @@ def ValClassifer2(BLogits,BLabel,model,criterion,TrainIndex):
         TrainIndex = TrainIndex[args.TB2:]
     return top1.avg
 
-def ValClassifer(BLogits,BLabel, model,Index,SaveDir):
-    """
-        Run one train epoch
-    """
-    Index = Index[np.random.permutation(Index.shape[0])]
-    open('%s/confidence_TMP_In.txt' % SaveDir, 'w').close()
-    open('%s/confidence_TMP_Out.txt' % SaveDir, 'w').close()
-    top1 = AverageMeter()
-    # switch to train mode
-    model.eval()
-    # for i, (input, target) in enumerate(train_loader):
-    i = 0
-    while not len(Index) == 0:
-        if len(Index) < args.TB2:
-            FDx = torch.from_numpy(BLogits[1, Index[0:]].astype(dtype=np.float32))
-            PDx = torch.from_numpy(BLogits[0, Index[0:]].astype(dtype=np.float32))
-            target = torch.from_numpy(BLabel[Index[0:]])
-        else:
-            PDx = torch.from_numpy(BLogits[0, Index[0:args.TB2]].astype(dtype=np.float32))
-            FDx = torch.from_numpy(BLogits[1, Index[0:args.TB2]].astype(dtype=np.float32))
-            target = torch.from_numpy(BLabel[Index[0:args.TB2]])
-        target = target.cuda()
-        target = target.cuda()
-        PDx = torch.autograd.Variable(PDx).cuda()
-        FDx = torch.autograd.Variable(FDx).cuda()
-        target_var = torch.autograd.Variable(target).long()
-
-        ####
-        output = model(PDx, FDx)
-        output = output.float()
-        prec1, correct = accuracy(output.data, target_var)
-
-        #### Transfer the three classes label to two classes label, i.e., if a sample is classifed as 0 or 1, it will be treated
-        # as normal sample; but if it is classifed as 2, it is an adv sample.
-
-        Bioutput = torch.zeros([output.shape[0],2])
-        Bioutput[:,0] = torch.max(output[:,0:2],1)[0]
-        Bioutput[:,1] = output[:, 2]
-        target_var[np.nonzero(target_var.cpu().numpy() == 1)] = 0
-        target_var[np.nonzero(target_var.cpu().numpy() == 2)] = 1
-        ####
-        #### calculate the binary classifer performance measure: 'TNR', 'AUROC', 'DTACC', 'AUIN', 'AUOUT'
-        y_pred = Bioutput.detach().cpu().numpy().astype(np.float64)[:, 1]
-        Y = target_var.detach().cpu().numpy().astype(np.float64)
-        num_samples = Y.shape[0]
-        l1 = open('%s/confidence_TMP_In.txt'%SaveDir, 'a')
-        l2 = open('%s/confidence_TMP_Out.txt'%SaveDir, 'a')
-        for i in range(num_samples):
-            if Y[i] == 0:
-                l1.write("{}\n".format(-y_pred[i]))
-            else:
-                l2.write("{}\n".format(-y_pred[i]))
-        ####
-        top1.update(prec1[0], FDx.shape[0])
-        # measure elapsed time
-        i = i+1
-        Index = Index[args.TB2:]
-    results = callog.metric(SaveDir, ['TMP'])
-    return results, top1.avg
-
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed by 2 every 30 epochs"""
     lr = args.lr * (0.5 ** (epoch // 1))
@@ -526,6 +417,28 @@ def get_data(args):
 
 
     return clean_data,adv_data, noisy_data, label
+
+def get_auroc(output,target_var,SaveDir):
+    Bioutput = torch.zeros([output.shape[0], 2])
+    Bioutput[:, 0] = torch.max(output[:, 0:2], 1)[0]
+    Bioutput[:, 1] = output[:, 2]
+    target_var[np.nonzero(target_var.cpu().numpy() == 1)] = 0
+    target_var[np.nonzero(target_var.cpu().numpy() == 2)] = 1
+    Bioutput = torch.nn.Softmax(dim=1)(Bioutput)
+    y_pred = Bioutput.detach().cpu().numpy().astype(np.float64)[:, 1]
+    Y = target_var.detach().cpu().numpy().astype(np.float64)
+    num_samples = Y.shape[0]
+    l1 = open('%s/confidence_TMP_In.txt' % SaveDir, 'a')
+    l2 = open('%s/confidence_TMP_Out.txt' % SaveDir, 'a')
+    for i in range(num_samples):
+        if Y[i] == 0:
+            l1.write("{}\n".format(-y_pred[i]))
+        else:
+            l2.write("{}\n".format(-y_pred[i]))
+    l1.flush()
+    l2.flush()
+    results = callog.metric(SaveDir, ['TMP'])
+    return results
 
 def processBar(epoch ,args, TotalDataScale,losses,top1,i):
     if (i + 1) * args.TB > TotalDataScale:
@@ -597,78 +510,14 @@ def get_adv_noisy(net_type,dataset):
         adv_noisy_list = [1.03,.76,.33,0.81]
     return adv_test_list, adv_noisy_list
 
-def GetStackLogitValues(clean_data,noisy_data,adv_data,label, PDmodel, FDmodel, args,Logit_Save):
-    if not os.path.exists(Logit_Save):
-        os.makedirs(Logit_Save)
+def GetStackLogitValues(LogitsPath):
 
-    if args.retrain == True:
-        shutil.rmtree(Logit_Save)
-        os.makedirs(Logit_Save)
+    Size = np.load(LogitsPath + '/Size.npy')
+    BLogits = np.load(LogitsPath+'/BLogits.npy')
+    BLabel = np.load(LogitsPath+'/BLabel.npy')
+    CTarget = np.load(LogitsPath+'/CTarget.npy')
+    CLogits = np.load(LogitsPath+'/CLogits.npy')
 
-    if os.path.exists(Logit_Save+'/BLogits.npy') and os.path.exists(Logit_Save+'/BLabel.npy') \
-            and os.path.exists(Logit_Save+'/CTarget.npy') and os.path.exists(Logit_Save+'/CLogits.npy') and \
-            os.path.exists(Logit_Save+'/Size.npy'):
-        # print('################## Load Logits from: {}##################'.format(Logit_Save))
-        Size = np.load(Logit_Save + '/Size.npy')
-        BLogits = np.load(Logit_Save+'/BLogits.npy')
-        BLabel = np.load(Logit_Save+'/BLabel.npy')
-        CTarget = np.load(Logit_Save+'/CTarget.npy')
-        CLogits = np.load(Logit_Save+'/CLogits.npy')
-
-    elif args.retrain:
-        print('################## Generate Logits from: {}_{}_{}_{} ##################'. \
-              format(args.dataset,args.net_type,args.adv_type,args.AdvNoise))
-        print('Clean Data')
-        CPFLogits, CPLogits, CLabel, CPF_Targets, CP_Targets,CCrtFlag = GetLogitValues(clean_data, label, PDmodel, FDmodel, args,
-                                                                    Natural=True)
-        INDEX = np.argmax(CPFLogits[0, :, :], 1)-np.argmax(CPFLogits[1,:,:],1)
-        np.sum(INDEX)
-        print('\nNoisy Data')
-        NsyPFLogits, NsyPLogits, NsyLabel, NsyPF_Targets, NsyP_Targets,NCrtFlag = GetLogitValues(noisy_data, label, PDmodel,
-                                                                                        FDmodel, args, Natural=True)
-        INDEX = np.argmax(NsyPFLogits[0, :, :], 1)-np.argmax(NsyPFLogits[1,:,:],1)
-        np.sum(INDEX)
-        print('\nAdv Data')
-        AdvPFLogits, AdvLabel, AdvPF_Targets,ACrtFlag = GetLogitValues(adv_data, label, PDmodel, FDmodel, args, Natural=False)
-
-        np.size(np.nonzero(np.argmax(AdvPFLogits[0, :, :], 1) - label.numpy()))/label.shape[0]
-        Size = [CPFLogits.shape[1],CPLogits.shape[1],AdvPFLogits.shape[1]]
-        BLogits = np.concatenate((CPFLogits, CPLogits, NsyPFLogits, NsyPLogits, AdvPFLogits), 1)
-        BLabel = np.concatenate((CLabel, NsyLabel, AdvLabel), 0)
-        CTarget = np.concatenate((CPF_Targets, CP_Targets), 0)
-        CLogits = np.concatenate((CPFLogits, CPLogits,), 1)
-        print('\n################## Save Logits in: {} ##################'.format(Logit_Save))
-        np.save(Logit_Save + '/Size.npy', Size)
-        np.save(Logit_Save + '/BLogits.npy', BLogits)
-        np.save(Logit_Save+'/BLabel.npy',BLabel)
-        np.save(Logit_Save+'/CTarget.npy',CTarget)
-        np.save(Logit_Save+'/CLogits.npy',CLogits)
-    else:
-        print('################## Generate Logits from: {}_{}_{}_{} ##################'. \
-              format(args.dataset, args.net_type, args.adv_type, args.AdvNoise))
-        print('Clean Data')
-        CPFLogits, CPLogits, CLabel, CPF_Targets, CP_Targets, CCrtFlag = GetLogitValues(clean_data, label, PDmodel,
-                                                                                        FDmodel, args,
-                                                                                        Natural=True)
-        print('\nNoisy Data')
-        NsyPFLogits, NsyPLogits, NsyLabel, NsyPF_Targets, NsyP_Targets, NCrtFlag = GetLogitValues(noisy_data, label,
-                                                                                                  PDmodel,
-                                                                                                  FDmodel, args,
-                                                                                                  Natural=True)
-        print('\nAdv Data')
-        AdvPFLogits, AdvLabel, AdvPF_Targets, ACrtFlag = GetLogitValues(adv_data, label, PDmodel, FDmodel, args,
-                                                                        Natural=False)
-        Size = [CPFLogits.shape[1], CPLogits.shape[1], AdvPFLogits.shape[1]]
-        BLogits = np.concatenate((CPFLogits, CPLogits, NsyPFLogits, NsyPLogits, AdvPFLogits), 1)
-        BLabel = np.concatenate((CLabel, NsyLabel, AdvLabel), 0)
-        CTarget = np.concatenate((CPF_Targets, CP_Targets), 0)
-        CLogits = np.concatenate((CPFLogits, CPLogits,), 1)
-        print('\n################## Save Logits in: {} ##################'.format(Logit_Save))
-        np.save(Logit_Save + '/Size.npy', Size)
-        np.save(Logit_Save + '/BLogits.npy', BLogits)
-        np.save(Logit_Save + '/BLabel.npy', BLabel)
-        np.save(Logit_Save + '/CTarget.npy', CTarget)
-        np.save(Logit_Save + '/CLogits.npy', CLogits)
     TS0 = int(np.floor(args.TSR * Size[0]))
     TS1 = int(np.floor(args.TSR * Size[1]))
     TS2 = int(np.floor(args.TSR * Size[2]))
@@ -684,6 +533,45 @@ def GetStackLogitValues(clean_data,noisy_data,adv_data,label, PDmodel, FDmodel, 
 
     return BLogits,BLabel,CTarget,CLogits,TrainIndex,TestIndex
 
+def ValClassifer(BLogits,BLabel, model,Index,SaveDir,PRINT=False):
+    Index = Index[np.random.permutation(Index.shape[0])]
+    open('%s/confidence_TMP_In.txt' % SaveDir, 'w').close()
+    open('%s/confidence_TMP_Out.txt' % SaveDir, 'w').close()
+    model.eval()
+    TotalDataScale = len(Index)
+    i = 0
+    while not len(Index) == 0:
+        if len(Index) < args.TB:
+            FDx = torch.from_numpy(BLogits[1, Index[0:]].astype(dtype=np.float32))
+            PDx = torch.from_numpy(BLogits[0, Index[0:]].astype(dtype=np.float32))
+            target = torch.from_numpy(BLabel[Index[0:]])
+        else:
+            PDx = torch.from_numpy(BLogits[0, Index[0:args.TB]].astype(dtype=np.float32))
+            FDx = torch.from_numpy(BLogits[1, Index[0:args.TB]].astype(dtype=np.float32))
+            target = torch.from_numpy(BLabel[Index[0:args.TB]])
+        target = target.cuda()
+        target = target.cuda()
+        PDx = torch.autograd.Variable(PDx).cuda()
+        FDx = torch.autograd.Variable(FDx).cuda()
+        target_var = torch.autograd.Variable(target).long()
+        output = model(PDx, FDx)
+        output = output.float()
+        Index = Index[args.TB:]
+        results = get_auroc(output, target_var, SaveDir)
+        auroc = results['TMP']['AUROC']
+
+        if PRINT:
+            if (i + 1) * args.TB > TotalDataScale:
+                r = '\rEpoch: [Test][{0}/{1}] ' \
+                    ' auroc{auroc: .3f}'.format(TotalDataScale, TotalDataScale, auroc=auroc*100)
+            else:
+                r = '\rEpoch: [Test][{0}/{1}] ' \
+                    ' auroc{auroc: .3f}'.format((i + 1) * args.TB, TotalDataScale, auroc=auroc*100)
+            sys.stdout.write(r)
+
+        i = i+1
+
+    return results
 
 if __name__ == '__main__':
     main()
