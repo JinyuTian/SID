@@ -1,4 +1,4 @@
-# Detecting Adversarial Examples from Sensitivity Inconsistency of Spatial-Transform Domain (Paper ID: 2700)
+# Detecting Adversarial Examples from Sensitivity Inconsistency of Spatial-Transform Domain
 
 
 ## Preliminaries
