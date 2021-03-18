@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteMappingsManager">
+    <list>
+      <list>
+        <remote-mappings server-id="python@sftp://jinyu@10.113.160.122:22/home/jinyu/anaconda3/envs/SE/bin/python3" />
+        <remote-mappings server-id="python@sftp://jinyu@10.113.178.177:22/home/jinyu/anaconda3/envs/SE/bin/python3">
+          <settings>
+            <list>
+              <mapping local-root="$PROJECT_DIR$" remote-root="/home/jinyu/SID" />
+            </list>
+          </settings>
+        </remote-mappings>
+      </list>
+    </list>
+  </component>
+</project>
