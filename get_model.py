@@ -1,5 +1,4 @@
 from Models import *
-from dataloaders import mnist, cifar10
 import torch.backends.cudnn as cudnn
 import vgg
 

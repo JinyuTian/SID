@@ -131,9 +131,6 @@ def main():
         DataFrames[key]['data'].to_csv('{}.csv'.format(key))
         print('Save generalizability results of SIDs on: {}'.format(key))
 
-
-
-
 def Detect(adv_source,SID,args,DataFrames):
     LogitsPath = os.path.join(os.path.join(args.AE_source, adv_source),'Logits')
     BLogits, BLabel, CTarget, CLogits, TrainIndex, ValIndex = GetStackLogitValues(LogitsPath)
@@ -150,7 +147,6 @@ def Detect(adv_source,SID,args,DataFrames):
     print(' {val:6.2f}\n'.format(val=100. * results['TMP']['AUOUT']), end='')
 
     return DataFrames
-
 
 def TrainClassifer(BLogits,BLabel,model,CLogits,CTarget,criterion, optimizer, epoch,TrainIndex):
     """
@@ -386,32 +382,17 @@ def adjust_learning_rate(optimizer, epoch):
         param_group['lr'] = lr
 
 def get_data(args):
-
-    # print('load:{0}/{1}_{2}/clean_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
-    #                                                             args.AdvNoise))
-    # print('load: {0}/{1}_{2}/adv_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
-    #                                                           args.AdvNoise))
-    #
-    # print('load:{0}/{1}_{2}/noisy_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset,
-    #                                                                    args.adv_type,
-    #                                                                    args.AdvNoise))
-    #
-    # print(
-    #     'load: {0}/{1}_{2}/label_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
-    #                                                              args.AdvNoise))
-
-
-    clean_data = torch.load(
-        '{0}/{1}_{2}_{5}/clean_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
+    clean_data = np.load(
+        '{0}/{1}_{2}_{5}/clean_data_{1}_{2}_{3}_{4:.2f}.npy'.format(args.outf, args.net_type, args.dataset, args.adv_type,
                                                                 args.AdvNoise,args.adv_type))
-    adv_data = torch.load(
-        '{0}/{1}_{2}_{5}/adv_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
+    adv_data = np.load(
+        '{0}/{1}_{2}_{5}/adv_data_{1}_{2}_{3}_{4:.2f}.npy'.format(args.outf, args.net_type, args.dataset, args.adv_type,
                                                               args.AdvNoise, args.adv_type))
-    noisy_data = torch.load(
-        '{0}/{1}_{2}_{5}/noisy_data_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
+    noisy_data = np.load(
+        '{0}/{1}_{2}_{5}/noisy_data_{1}_{2}_{3}_{4:.2f}.npy'.format(args.outf, args.net_type, args.dataset, args.adv_type,
                                                                 args.AdvNoise,args.adv_type))
-    label = torch.load(
-        '{0}/{1}_{2}_{5}/label_{1}_{2}_{3}_{4:.2f}.pth'.format(args.outf, args.net_type, args.dataset, args.adv_type,
+    label = np.load(
+        '{0}/{1}_{2}_{5}/label_{1}_{2}_{3}_{4:.2f}.npy'.format(args.outf, args.net_type, args.dataset, args.adv_type,
                                                            args.AdvNoise,args.adv_type))
 
 

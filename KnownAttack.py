@@ -9,7 +9,7 @@ import calculate_log as callog
 import numpy as np
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('--epochs', default=1, type=int)
+parser.add_argument('--epochs', default=100, type=int)
 parser.add_argument('--start-epoch', default=0, type=int)
 parser.add_argument('-TB', default=100, type=int, help='Batch size')
 parser.add_argument('--lr', '--learning-rate', default=0.005, type=float)
@@ -346,27 +346,27 @@ def get_auroc(output,target_var,SaveDir):
 
 def get_data(args):
     try:
-        clean_data = torch.load(
-            '{0}/clean_data_{1}_{2}_{3}_{4}.pth'.format(args.adv_source, args.net_type, args.dataset, args.adv_type,
+        clean_data = np.load(
+            '{0}/clean_data_{1}_{2}_{3}_{4}.npy'.format(args.adv_source, args.net_type, args.dataset, args.adv_type,
                                                                     args.AdvNoise))
 
-        adv_data = torch.load(
-            '{0}/adv_data_{1}_{2}_{3}_{4}.pth'.format(args.adv_source, args.net_type, args.dataset, args.adv_type,
+        adv_data = np.load(
+            '{0}/adv_data_{1}_{2}_{3}_{4}.npy'.format(args.adv_source, args.net_type, args.dataset, args.adv_type,
                                                                     args.AdvNoise))
 
-        noisy_data = torch.load(
-            '{0}/noisy_data_{1}_{2}_{3}_{4}.pth'.format(args.adv_source, args.net_type, args.dataset,
+        noisy_data = np.load(
+            '{0}/noisy_data_{1}_{2}_{3}_{4}.npy'.format(args.adv_source, args.net_type, args.dataset,
                                                                       args.adv_type,
                                                                       args.AdvNoise))
 
-        label = torch.load(
-            '{0}/label_{1}_{2}_{3}_{4}.pth'.format(args.adv_source, args.net_type, args.dataset,
+        label = np.load(
+            '{0}/label_{1}_{2}_{3}_{4}.npy'.format(args.adv_source, args.net_type, args.dataset,
                                                                         args.adv_type,
                                                                         args.AdvNoise))
     except:
         print('No AEs {} !'.format(args.adv_source))
 
-    return clean_data,adv_data, noisy_data, label
+    return torch.from_numpy(clean_data),torch.from_numpy(adv_data), torch.from_numpy(noisy_data), torch.from_numpy(label)
 
 def GET_MODEL(args,net_type):
     args.resume = './pre_trained/' + args.domain+net_type + '_' + args.dataset + '.pth'
