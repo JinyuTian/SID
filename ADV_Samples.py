@@ -150,7 +150,6 @@ def main():
         print('\t [{4}/{5}] Adv Noise: {0:.2f}; Final Accuracy: {1:.2f}; Adv Accuracy: {2:.2f}; FDAdv Accuracy: {6:.2f}; FD Accuracy: {3:.2f}'.format(
             AdvNoise, BatchAc, AdvAc, FDAc,count,len(test_loader),FDAdvAc))
         count += 1
-        break
     selected_list = torch.LongTensor(selected_list)
     clean_data_tot = torch.index_select(clean_data_tot, 0, selected_list)
     adv_data_tot = torch.index_select(adv_data_tot, 0, selected_list)
