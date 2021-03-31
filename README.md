@@ -8,7 +8,7 @@
 
 ### 0. Train Dual model:
 	TrainDualModel.py
-	Pretrained primal and dual models for testing have been placed in the directory: `./pre_trained/`.
+	Pretrained primal and dual models for testing have been placed in Google drive: https://drive.google.com/file/d/1AbYkSKaOb7RozZ2TJlD4bvkxrSus12JJ/view?usp=sharing
 	python TrainDualModel.py --dataset=cifar10 --net_type=resnet --lr=1e-6 --wd=0.005
 	
 ### 1. Prepare correctly classified imags, the correspodning adversarial examples and natural noise examples:
